@@ -1,0 +1,71 @@
+@page "/"
+@using System
+@using System.Threading.Tasks
+@using Soenneker.Calendly.Blazor.Abstract
+@using Soenneker.Calendly.Blazor.Options
+@using Soenneker.Calendly.Blazor.Dtos
+@using Soenneker.Calendly.Blazor.Components
+@implements IAsyncDisposable
+@inject ICalendly Calendly
+
+<PageTitle>Calendly Blazor demo</PageTitle>
+<h1>Calendly scheduling</h1>
+<p>Enter your public Calendly scheduling URL to try a popup, floating badge, or inline booking form.</p>
+<label>Scheduling URL <input type="url" @bind="_url" placeholder="https://calendly.com/your-account/demo" /></label>
+<label>Name <input @bind="_name" autocomplete="name" /></label>
+<label>Email <input type="email" @bind="_email" autocomplete="email" /></label>
+<div>
+    <button @onclick="OpenPopup" disabled="@_busy">Open popup</button>
+    <button @onclick="ShowBadge" disabled="@_busy">Show badge</button>
+    <button @onclick="RemoveBadge" disabled="@_busy">Remove badge</button>
+    <button @onclick="ShowInline" disabled="@_busy">Show inline</button>
+    <button @onclick="HideInline" disabled="@(_inline is null)">Remove inline</button>
+</div>
+@if (_error is not null) { <p role="alert">@_error</p> }
+@if (_status is not null) { <p role="status">@_status</p> }
+@if (_inline is not null) { <CalendlyInline Options="_inline" /> }
+
+@code {
+    private string _url = "";
+    private string _name = "";
+    private string _email = "";
+    private string? _error;
+    private string? _status;
+    private bool _busy;
+    private CalendlyInlineOptions? _inline;
+    protected override void OnInitialized() => Calendly.EventScheduled += Scheduled;
+    private CalendlyPrefill Prefill() => new() { Name = _name, Email = _email };
+    private async Task Run(Func<ValueTask> action)
+    {
+        _busy = true;
+        _error = null;
+        try { await action(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+    private Task OpenPopup() => Run(() => Calendly.OpenPopup(new() { Url = _url, Prefill = Prefill() }));
+    private Task ShowBadge() => Run(() => Calendly.CreateBadge(new() { Url = _url, Prefill = Prefill(), Text = "Book a demo" }));
+    private Task RemoveBadge() => Run(() => Calendly.DestroyBadge());
+    private void ShowInline()
+    {
+        if (!Uri.TryCreate(_url, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
+            !(uri.Host == "calendly.com" || uri.Host.EndsWith(".calendly.com", StringComparison.OrdinalIgnoreCase)) ||
+            !uri.IsDefaultPort || uri.UserInfo.Length > 0)
+        { _error = "Enter a public HTTPS Calendly URL."; return; }
+        _error = null;
+        _inline = new() { Url = _url, Prefill = Prefill() };
+    }
+    private void HideInline() => _inline = null;
+    private Task Scheduled(CalendlyEvent data) => InvokeAsync(() =>
+    {
+        _status = "Booking completed.";
+        StateHasChanged();
+    });
+    public async ValueTask DisposeAsync()
+    {
+        Calendly.EventScheduled -= Scheduled;
+        try { await Calendly.DestroyBadge(); await Calendly.ClosePopup(); }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+    }
+}

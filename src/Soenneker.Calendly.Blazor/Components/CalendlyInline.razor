@@ -1,0 +1,49 @@
+@namespace Soenneker.Calendly.Blazor.Components
+@using System
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@using Soenneker.Calendly.Blazor.Abstract
+@using Soenneker.Calendly.Blazor.Options
+@using Soenneker.Calendly.Blazor.Dtos
+@implements IAsyncDisposable
+@inject ICalendly Calendly
+
+<div @attributes="AdditionalAttributes" id="@_id" style="@Style"></div>
+
+@code {
+    private readonly string _id = $"calendly-{Guid.NewGuid()}";
+    private bool _subscribed;
+
+    /// <summary>Scheduling options. The widget is refreshed when this component renders.</summary>
+    [Parameter, EditorRequired] public CalendlyInlineOptions Options { get; set; } = default!;
+    /// <summary>Container dimensions. Auto-resize still requires an initial height.</summary>
+    [Parameter] public string Style { get; set; } = "min-width:320px;height:700px;";
+    /// <summary>Additional HTML attributes. The generated ID is reserved.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public System.Collections.Generic.Dictionary<string, object>? AdditionalAttributes { get; set; }
+    /// <summary>Called when this widget completes a booking.</summary>
+    [Parameter] public EventCallback<CalendlyEvent> OnEventScheduled { get; set; }
+    private string? _renderedOptions;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_subscribed)
+        {
+            Calendly.EventScheduled += HandleScheduled;
+            _subscribed = true;
+        }
+        string json = System.Text.Json.JsonSerializer.Serialize(Options, LibraryJsonContext.Default.CalendlyInlineOptions);
+        if (json == _renderedOptions) return;
+        await Calendly.CreateInline(_id, Options);
+        _renderedOptions = json;
+    }
+    private Task HandleScheduled(CalendlyEvent data) => data.ElementId == _id
+        ? InvokeAsync(() => OnEventScheduled.InvokeAsync(data)) : Task.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        Calendly.EventScheduled -= HandleScheduled;
+        try { await Calendly.DestroyInline(_id); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+    }
+}
